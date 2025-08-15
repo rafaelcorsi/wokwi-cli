@@ -11,12 +11,10 @@ export class ExpectEngine extends EventEmitter {
   }
 
   feed(bytes: number[]) {
-    if (this.expectTexts.length === 0 && this.failTexts.length === 0) {
-      return;
-    }
     for (const byte of bytes) {
       const char = String.fromCharCode(byte);
       if (char === '\n') {
+        this.emit('line', this.currentLine);
         this.testMatches();
         this.currentLine = '';
       } else {

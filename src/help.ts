@@ -12,6 +12,7 @@ export function cliHelp() {
       {green --expect-text} <string>      Expect the given text in the output
       {green --fail-text} <string>        Fail if the given text is found in the output
       {green --elf} <path>                ELF file to simulate (default: read from wokwi.toml)
+      {green --diagram-file} <path>       Path to the diagram.json file, relative to project root (default: diagram.json)
       {green --interactive}               Redirect stdin to the simulated serial port
       {green --scenario} <path>           Run the given scenario (yaml) file, path is relative to project root
       {green --serial-log-file} <path>    Save the serial monitor output to the given file
@@ -20,6 +21,16 @@ export function cliHelp() {
       {green --screenshot-file} <string>  File name to save the screenshot to (default: screenshot.png)
       {green --timeout} <number>          Timeout in simulation milliseconds (default: 30000)
       {green --timeout-exit-code} <number> Process exit code when timeout is reached (default: 42)
+
+  {bold COMMANDS}
+
+      {green init} [path]                     Initialize a new Wokwi project
+      {green mcp} [path]                      Start MCP server for AI integration (experimental)
+
+  {bold PROJECT CONFIGURATION}
+
+      To configure your project for Wokwi, run the "wokwi-cli init" command in the project directory.
+      This will ask you a few questions and create both wokwi.toml and diagram.json files.
 
   {bold EXAMPLES}
 
@@ -30,6 +41,10 @@ export function cliHelp() {
       Run the simulation, Take a screenshot of the "lcd1" part after 4.5 seconds, and then exit:
 
       {dim $} {bold wokwi-cli} {green --screenshot-part} lcd1 {green --screenshot-time} 4500 {green --timeout} 4500 {green --timeout-exit-code} 0
+
+      Start MCP server for AI integration (requires WOKWI_CLI_TOKEN environment variable):
+
+      {dim $} {bold wokwi-cli} {green mcp} [project-directory]
   
 `);
 }
