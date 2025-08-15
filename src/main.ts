@@ -9,8 +9,10 @@ import { EventManager } from './EventManager.js';
 import { ExpectEngine } from './ExpectEngine.js';
 import { TestScenario } from './TestScenario.js';
 import { parseConfig } from './config.js';
+import { idfProjectConfig } from './esp/idfProjectConfig.js';
 import { cliHelp } from './help.js';
 import { loadChips } from './loadChips.js';
+import { initProjectWizard } from './project/initProjectWizard.js';
 import { readVersion } from './readVersion.js';
 import { DelayCommand } from './scenario/DelayCommand.js';
 import { ExpectPinCommand } from './scenario/ExpectPinCommand.js';
@@ -18,9 +20,21 @@ import { SetControlCommand } from './scenario/SetControlCommand.js';
 import { WaitSerialCommand } from './scenario/WaitSerialCommand.js';
 import { WaitPinCommand } from './scenario/WaitPinCommand.js';
 import { WaitPinChangeCommand } from './scenario/WaitPinChangeCommand.js';
+import { WriteSerialCommand } from './scenario/WriteSerialCommand.js';
 import { uploadFirmware } from './uploadFirmware.js';
+import { TakeScreenshotCommand } from './scenario/TakeScreenshotCommand.js';
+import { WokwiMCPServer } from './mcp/MCPServer.js';
 
 const millis = 1_000_000;
+
+function printVersion(short = false) {
+  const { sha, version } = readVersion();
+  if (short) {
+    console.log(`${version} (${sha})`);
+  } else {
+    console.log(`Wokwi CLI v${version} (${sha})`);
+  }
+}
 
 async function main() {
   const args = arg(
@@ -28,6 +42,8 @@ async function main() {
       '--help': Boolean,
       '--quiet': Boolean,
       '--version': Boolean,
+      '--short-version': Boolean,
+      '--diagram-file': String,
       '--elf': String,
       '--expect-text': String,
       '--fail-text': String,
@@ -50,6 +66,7 @@ async function main() {
   const expectText = args['--expect-text'];
   const failText = args['--fail-text'];
   const interactive = args['--interactive'];
+  const diagramFile = args['--diagram-file'];
   const serialLogFile = args['--serial-log-file'];
   const scenarioFile = args['--scenario'];
   const timeout = args['--timeout'] ?? 30000;
@@ -59,9 +76,13 @@ async function main() {
   const timeoutExitCode = args['--timeout-exit-code'] ?? 42;
   const timeoutNanos = timeout * millis;
 
+  if (args['--version'] === true || args['--short-version'] === true) {
+    printVersion(args['--short-version']);
+    process.exit(0);
+  }
+
   if (!quiet) {
-    const { sha, version } = readVersion();
-    console.log(`Wokwi CLI v${version} (${sha})`);
+    printVersion();
   }
 
   if (args['--help']) {
@@ -69,26 +90,90 @@ async function main() {
     process.exit(0);
   }
 
+  if (args._[0] === 'init') {
+    await initProjectWizard(args._[1] ?? '.', { diagramFile });
+    process.exit(0);
+  }
+
   const token = process.env.WOKWI_CLI_TOKEN;
   if (token == null || token.length === 0) {
     console.error(
-      `Error: Missing WOKWI_CLI_TOKEN environment variable. Please set it to your Wokwi token.\nGet your token at https://wokwi.com/dashboard/ci.`,
+      chalkTemplate`{red Error:} Missing {yellow WOKWI_CLI_TOKEN} environment variable. Please set it to your Wokwi token.\nGet your token at {yellow https://wokwi.com/dashboard/ci}.`,
     );
     process.exit(1);
   }
 
+  if (args._[0] === 'mcp') {
+    const rootDir = args._[1] || '.';
+
+    const mcpServer = new WokwiMCPServer({ rootDir, token, quiet });
+
+    process.on('SIGINT', () => {
+      void mcpServer.stop().then(() => {
+        process.exit(0);
+      });
+    });
+
+    process.on('SIGTERM', () => {
+      void mcpServer.stop().then(() => {
+        process.exit(0);
+      });
+    });
+
+    await mcpServer.start();
+    return;
+  }
+
   const rootDir = args._[0] || '.';
-  const configPath = `${rootDir}/wokwi.toml`;
-  const diagramFile = `${rootDir}/diagram.json`;
-  const configExists = existsSync(configPath);
+  const configPath = path.join(rootDir, 'wokwi.toml');
+  const diagramFilePath = path.resolve(rootDir, diagramFile ?? 'diagram.json');
+  const espIdfFlasherArgsPath = path.resolve(rootDir, 'build/flasher_args.json');
+  const espIdfProjectDescriptionPath = path.resolve(rootDir, 'build/project_description.json');
+  const isIDFProject =
+    existsSync(espIdfFlasherArgsPath) && existsSync(espIdfProjectDescriptionPath);
+  let configExists = existsSync(configPath);
+  let diagramExists = existsSync(diagramFilePath);
+
+  if (isIDFProject) {
+    if (!quiet) {
+      console.log(`Detected IDF project in ${rootDir}`);
+    }
+    if (
+      !idfProjectConfig({
+        rootDir,
+        configPath,
+        diagramFilePath,
+        projectDescriptionPath: espIdfProjectDescriptionPath,
+        createConfig: !configExists,
+        createDiagram: !diagramExists,
+        quiet,
+      })
+    ) {
+      process.exit(1);
+    }
+    configExists = true;
+    diagramExists = true;
+  }
 
   if (!elf && !configExists) {
-    console.error(`Error: wokwi.toml not found in ${path.resolve(rootDir)}`);
+    console.error(
+      chalkTemplate`{red Error:} {yellow wokwi.toml} not found in {yellow ${path.resolve(
+        rootDir,
+      )}}.`,
+    );
+    console.error(
+      chalkTemplate`Run \`{green wokwi-cli init}\` to automatically create a {yellow wokwi.toml} file.`,
+    );
     process.exit(1);
   }
 
-  if (!existsSync(diagramFile)) {
-    console.error(`Error: diagram.json not found in ${path.resolve(rootDir)}`);
+  if (!existsSync(diagramFilePath)) {
+    console.error(
+      chalkTemplate`{red Error:} {yellow diagram.json} not found in {yellow ${diagramFilePath}}.`,
+    );
+    console.error(
+      chalkTemplate`Run \`{green wokwi-cli init}\` to automatically create a {yellow diagram.json} file.`,
+    );
     process.exit(1);
   }
 
@@ -101,7 +186,8 @@ async function main() {
     config = await parseConfig(configData, rootDir);
 
     firmwarePath = elf ?? join(rootDir, config.wokwi.firmware);
-    elfPath = elf ?? join(rootDir, config.wokwi.elf);
+    const configElfPath = config.wokwi.elf ? join(rootDir, config.wokwi.elf) : undefined;
+    elfPath = elf ?? configElfPath;
   } else if (elf) {
     firmwarePath = elf;
     elfPath = elf;
@@ -110,22 +196,33 @@ async function main() {
   }
 
   if (!existsSync(firmwarePath)) {
-    console.error(`Error: firmware file not found: ${path.resolve(firmwarePath)}`);
+    const fullPath = path.resolve(firmwarePath);
+    console.error(
+      chalkTemplate`{red Error:} {yellow firmware file} not found: {yellow ${fullPath}}.`,
+    );
+    console.error(
+      chalkTemplate`Please check the {yellow firmware} path in your {yellow wokwi.toml} configuration file.`,
+    );
     process.exit(1);
   }
 
-  if (!existsSync(elfPath)) {
-    console.error(`Error: ELF file not found: ${path.resolve(elfPath)}`);
+  if (elfPath != null && !existsSync(elfPath)) {
+    const fullPath = path.resolve(elfPath);
+    console.error(chalkTemplate`{red Error:} ELF file not found: {yellow ${fullPath}}.`);
+    console.error(
+      chalkTemplate`Please check the {yellow elf} path in your {yellow wokwi.toml} configuration file.`,
+    );
     process.exit(1);
   }
 
-  const diagram = readFileSync(diagramFile, 'utf8');
+  const diagram = readFileSync(diagramFilePath, 'utf8');
 
   const chips = loadChips(config?.chip ?? [], rootDir);
 
   const resolvedScenarioFile = scenarioFile ? path.resolve(rootDir, scenarioFile) : null;
   if (resolvedScenarioFile && !existsSync(resolvedScenarioFile)) {
-    console.error(`Error: scenario file not found: ${path.resolve(resolvedScenarioFile)}`);
+    const fullPath = path.resolve(resolvedScenarioFile);
+    console.error(chalkTemplate`{red Error:} scenario file not found: {yellow ${fullPath}}.`);
     process.exit(1);
   }
 
@@ -145,6 +242,8 @@ async function main() {
       'wait-serial': new WaitSerialCommand(expectEngine),
       'wait-pin': new WaitPinCommand(),
       'wait-pin-change': new WaitPinChangeCommand(),
+      'write-serial': new WriteSerialCommand(),
+      'take-screenshot': new TakeScreenshotCommand(path.dirname(resolvedScenarioFile)),
     });
     scenario.validate();
   }
@@ -196,7 +295,9 @@ async function main() {
     await client.connected;
     await client.fileUpload('diagram.json', diagram);
     const firmwareName = await uploadFirmware(client, firmwarePath);
-    await client.fileUpload('firmware.elf', readFileSync(elfPath));
+    if (elfPath != null) {
+      await client.fileUpload('firmware.elf', readFileSync(elfPath));
+    }
 
     for (const chip of chips) {
       await client.fileUpload(`${chip.name}.chip.json`, readFileSync(chip.jsonPath, 'utf-8'));
@@ -224,8 +325,14 @@ async function main() {
 
     if (screenshotPart != null && screenshotTime != null) {
       eventManager.at(screenshotTime * millis, async (t) => {
-        const result = await client.framebufferRead(screenshotPart);
-        writeFileSync(screenshotFile, result.png, 'base64');
+        try {
+          const result = await client.framebufferRead(screenshotPart);
+          writeFileSync(screenshotFile, result.png, 'base64');
+        } catch (err) {
+          console.error('Error taking screenshot:', (err as Error).toString());
+          client.close();
+          process.exit(1);
+        }
       });
     }
 
@@ -255,8 +362,8 @@ async function main() {
     };
 
     await client.simStart({
-      elf: 'test.elf',
       firmware: firmwareName,
+      elf: elfPath != null ? 'firmware.elf' : undefined,
       chips: chips.map((chip) => chip.name),
       pause: timeToNextEvent >= 0,
     });

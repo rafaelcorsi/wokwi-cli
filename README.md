@@ -37,6 +37,42 @@ cd esp-idf-hello-world
 wokwi-cli .
 ```
 
+## Configuration Wizard
+
+To generate a `wokwi.toml` and a default `diagram.json` files for your project, run:
+
+```bash
+wokwi-cli init
+```
+
+This will ask you a few questions and will create the necessary files in the current directory. If you want to create the files in a different directory, pass the directory name as an argument:
+
+```bash
+wokwi-cli init my-project
+```
+
+## MCP Server
+
+The MCP server is an experimental feature that allows you to use the Wokwi CLI as a MCP server. You can use it to integrate the Wokwi CLI with AI agents.
+
+To configure your AI agent to use the MCP server, add the following to your agent's configuration:
+
+```json
+{
+  "servers": {
+    "Wokwi": {
+      "type": "stdio",
+      "command": "wokwi-cli",
+      "args": ["mcp"],
+      "env": {
+        "WOKWI_CLI_TOKEN": "${input:wokwi-cli-token}"
+      }
+    }
+  }
+}
+```
+
+
 ## Development
 
 Clone the repository, install the npm depenedencies, and then run the CLI:

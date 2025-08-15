@@ -19,6 +19,7 @@ main() {
 
   case "$arch" in
   x86_64) arch="x64" ;;
+  aarch64) arch="arm64" ;;
   arm64) ;;
   *) echo "Unsupported architecture: $arch"; exit 1 ;;
   esac
@@ -48,7 +49,8 @@ main() {
   mkdir -p "$HOME/bin"
   ln -s -f "$exe" "$HOME/bin/wokwi-cli"
 
-  echo "wokwi-cli was installed successfully to $HOME/bin/wokwi-cli"
+  VERSION=$($exe --short-version)
+  echo "wokwi-cli version ${VERSION} was installed successfully to $HOME/bin/wokwi-cli"
 
   if command -v wokwi-cli >/dev/null; then
     echo "Run 'wokwi-cli --help' to get started"
