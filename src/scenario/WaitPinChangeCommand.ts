@@ -17,7 +17,7 @@ export class WaitPinChangeCommand implements IScenarioCommand {
       chalkTemplate`wait-pin-toggle {yellow ${partId}}:{magenta ${pinName}} to change from {yellow ${initalValue}}`,
     );
     let value = (await client.pinRead(partId, pinName))?.value ? 1 : 0;
-    while (value == initalValue) {
+    while (value === initalValue) {
       value = (await client.pinRead(partId, pinName))?.value ? 1 : 0;
     }
   }
