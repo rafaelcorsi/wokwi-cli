@@ -33,6 +33,8 @@ import { TouchCommand } from '../scenario/TouchCommand.js';
 import { TouchMoveCommand } from '../scenario/TouchMoveCommand.js';
 import { TouchPressCommand } from '../scenario/TouchPressCommand.js';
 import { TouchReleaseCommand } from '../scenario/TouchReleaseCommand.js';
+import { WaitPinChangeCommand } from '../scenario/WaitPinChangeCommand.js';
+import { WaitPinCommand } from '../scenario/WaitPinCommand.js';
 import { WaitSerialCommand } from '../scenario/WaitSerialCommand.js';
 import { WriteSerialCommand } from '../scenario/WriteSerialCommand.js';
 import { resolveSDCards, type SDCardSource } from '../sdcard/config.js';
@@ -295,6 +297,8 @@ async function runSimulation(projectPath: string, options: SimulateOptions, comm
       'expect-chip-output': new ExpectChipOutputCommand(),
       'expect-pin': new ExpectPinCommand(),
       'set-control': new SetControlCommand(),
+      'wait-pin': new WaitPinCommand(),
+      'wait-pin-change': new WaitPinChangeCommand(),
       'wait-serial': new WaitSerialCommand(),
       'write-serial': new WriteSerialCommand(),
       'take-screenshot': new TakeScreenshotCommand(path.dirname(resolvedScenarioFile)),
