@@ -1,0 +1,82 @@
+{
+  "name": "@wokwi/cli",
+  "version": "0.28.1",
+  "description": "Wokwi Simulator CLI (for CI and local development)",
+  "main": "dist/cli.cjs",
+  "type": "module",
+  "bin": {
+    "wokwi-cli": "dist/cli.cjs"
+  },
+  "files": [
+    "dist/bin/version.json",
+    "dist/cli.cjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "shx cp ../../README.md . && shx cp ../../LICENSE .",
+    "postpack": "shx rm README.md LICENSE",
+    "build": "tsc --noEmit && pnpm run bundle",
+    "bundle": "node tools/bundle.js",
+    "package": "pnpm run build && pkg --public -o dist/bin/wokwi-cli -t node20-linuxstatic-arm64,node20-linuxstatic-x64,node20-macos-arm64,node20-macos-x64,node20-win-x64 dist/cli.cjs",
+    "clean": "rimraf dist",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "cli": "tsx src/main.ts",
+    "test": "pnpm run lint && vitest --run",
+    "test:watch": "vitest --watch"
+  },
+  "keywords": [
+    "esp32",
+    "stm32",
+    "iot",
+    "embedded",
+    "testing",
+    "ci",
+    "wokwi",
+    "esp-idf",
+    "simulator",
+    "arduino",
+    "platformio",
+    "zephyr",
+    "micropython",
+    "circuitpython"
+  ],
+  "author": "Uri Shaked",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wokwi/wokwi-cli"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "@iarna/toml": "2.2.5",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@wokwi/client": "workspace:*",
+    "@wokwi/diagram-lint": "workspace:*",
+    "@wokwi/rfc2217": "workspace:*",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "chalk": "^5.3.0",
+    "chalk-template": "^1.1.0",
+    "commander": "^12.1.0",
+    "pngjs": "^7.0.0",
+    "tar": "^7.5.2",
+    "ws": "^8.13.0",
+    "yaml": "^2.3.1"
+  },
+  "devDependencies": {
+    "@types/pngjs": "^6.0.5",
+    "@types/tar": "^6.1.13",
+    "@types/ws": "^8.5.4",
+    "@yao-pkg/pkg": "^5.11.5",
+    "esbuild": "^0.25.2",
+    "husky": "^8.0.0",
+    "lint-staged": "^15.4.3",
+    "prettier": "^3.5.0",
+    "rimraf": "^5.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.2.2",
+    "vitest": "^3.0.5"
+  }
+}

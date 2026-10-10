@@ -1,0 +1,289 @@
+import {
+  APIClient,
+  SerialMonitorDataPayload,
+  type APIEvent,
+  type VCDReadResponse,
+} from '@wokwi/client';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import path from 'path';
+import { parseConfig } from '../config.js';
+import { DEFAULT_SERVER } from '../constants.js';
+import { loadChips } from '../loadChips.js';
+import { readVersion } from '../readVersion.js';
+import { resolveSDCards, type SDCardSource } from '../sdcard/config.js';
+import { uploadSDCards, writeBackSDCards } from '../sdcard/upload.js';
+import { WebSocketTransport } from '../transport/WebSocketTransport.js';
+import { uploadFirmware } from '../uploadFirmware.js';
+
+export interface StartSimulationOptions {
+  /** SD card contents: a folder or a raw .img file, relative to the project directory */
+  sdcard?: string;
+  /** Write the final SD card contents here (`.img` for an image, otherwise a folder) */
+  sdcardOut?: string;
+}
+
+export interface SimulationStatus {
+  running: boolean;
+  connected: boolean;
+  nanos: number;
+  project?: string;
+}
+
+export class SimulationManager {
+  private client?: APIClient;
+  private isConnected = false;
+  private currentProject?: string;
+  private serialBuffer: string[] = [];
+  private readonly maxSerialBuffer = 1000;
+  /** SD cards of the running simulation, for write-back */
+  private sdcards: SDCardSource[] = [];
+
+  constructor(
+    private readonly rootDir: string,
+    private readonly token: string,
+    private readonly quiet = false,
+  ) {}
+
+  async connect(): Promise<void> {
+    if (this.isConnected) {
+      return;
+    }
+
+    const { sha, version } = readVersion();
+    const transport = new WebSocketTransport(this.token, DEFAULT_SERVER, version, sha);
+    this.client = new APIClient(transport);
+
+    this.client.onConnected = (hello) => {
+      this.isConnected = true;
+      if (!this.quiet) {
+        console.error(`Connected to Wokwi Simulation API ${hello.appVersion}`);
+      }
+    };
+
+    this.client.onError = (error) => {
+      this.isConnected = false;
+      throw new Error(`API Error: ${error.message}`);
+    };
+
+    this.client.listen('serial-monitor:data', (event: APIEvent<SerialMonitorDataPayload>) => {
+      const { bytes } = event.payload;
+      this.addToSerialBuffer(String.fromCharCode(...bytes));
+    });
+
+    await this.client.connected;
+  }
+
+  private addToSerialBuffer(text: string) {
+    this.serialBuffer.push(text);
+    if (this.serialBuffer.length > this.maxSerialBuffer) {
+      this.serialBuffer.shift();
+    }
+  }
+
+  /**
+   * Starts (or replaces) the simulation. Returns the write-back messages of the previous
+   * simulation's SD cards, which are persisted before they are replaced.
+   */
+  async startSimulation(
+    projectPath?: string,
+    options: StartSimulationOptions = {},
+  ): Promise<string[]> {
+    if (!this.client) {
+      await this.connect();
+    }
+
+    const writeBack = await this.flushSDCards();
+
+    const targetDir = projectPath ?? this.rootDir;
+    const configPath = path.join(targetDir, 'wokwi.toml');
+    const diagramFilePath = path.join(targetDir, 'diagram.json');
+
+    if (!existsSync(configPath)) {
+      throw new Error(`wokwi.toml not found in ${targetDir}`);
+    }
+
+    if (!existsSync(diagramFilePath)) {
+      throw new Error(`diagram.json not found in ${targetDir}`);
+    }
+
+    const configData = readFileSync(configPath, 'utf8');
+    const config = await parseConfig(configData, targetDir);
+    const diagram = readFileSync(diagramFilePath, 'utf8');
+
+    const firmwarePath = path.join(targetDir, config.wokwi.firmware);
+    if (!existsSync(firmwarePath)) {
+      throw new Error(`Firmware file not found: ${firmwarePath}`);
+    }
+
+    const elfPath = config.wokwi.elf ? path.join(targetDir, config.wokwi.elf) : null;
+    if (elfPath && !existsSync(elfPath)) {
+      throw new Error(`ELF file not found: ${elfPath}`);
+    }
+
+    const chips = loadChips(config.chip ?? [], targetDir);
+    const sdcards = resolveSDCards({
+      rootDir: targetDir,
+      cwd: targetDir,
+      config: config.sdcard,
+      flags: {
+        sdcard: options.sdcard ? [options.sdcard] : undefined,
+        sdcardOut: options.sdcardOut ? [options.sdcardOut] : undefined,
+      },
+    });
+
+    // Upload files
+    if (!this.client) {
+      throw new Error('Not connected to API');
+    }
+    await this.client.fileUpload('diagram.json', diagram);
+    const firmwareParams = await uploadFirmware(this.client, firmwarePath);
+
+    if (elfPath) {
+      await this.client.fileUpload('firmware.elf', new Uint8Array(readFileSync(elfPath)));
+    }
+
+    for (const chip of chips) {
+      await this.client.fileUpload(`${chip.name}.chip.json`, readFileSync(chip.jsonPath, 'utf-8'));
+      await this.client.fileUpload(
+        `${chip.name}.chip.wasm`,
+        new Uint8Array(readFileSync(chip.wasmPath)),
+      );
+    }
+
+    const sdcardUpload = await uploadSDCards(this.client, sdcards, targetDir);
+
+    // Start simulation
+    await this.client.serialMonitorListen();
+    await this.client.simStart({
+      ...firmwareParams,
+      elf: elfPath ? 'firmware.elf' : undefined,
+      chips: chips.map((chip) => chip.name),
+      sdcards: sdcardUpload.params.length ? sdcardUpload.params : undefined,
+    });
+
+    this.currentProject = targetDir;
+    this.sdcards = sdcards;
+    return writeBack;
+  }
+
+  /**
+   * Writes the SD card contents back (write-back / sdcardOut), pausing the simulation first.
+   * Returns one message per card written.
+   */
+  private async flushSDCards(): Promise<string[]> {
+    if (!this.client || !this.sdcards.some((source) => source.writeback)) {
+      return [];
+    }
+    await this.client.simPause();
+    return await writeBackSDCards(this.client, this.sdcards, this.currentProject ?? this.rootDir);
+  }
+
+  /** Stops the simulation; returns the SD card write-back messages */
+  async stopSimulation(): Promise<string[]> {
+    if (!this.client) {
+      return [];
+    }
+    await this.client.simPause();
+    return await this.flushSDCards();
+  }
+
+  async resumeSimulation(): Promise<void> {
+    if (this.client) {
+      await this.client.simResume();
+    }
+  }
+
+  /** Restarts the simulation; returns the SD card write-back messages */
+  async restartSimulation(): Promise<string[]> {
+    if (!this.client) {
+      return [];
+    }
+    const writeBack = await this.flushSDCards();
+    await this.client.simRestart();
+    return writeBack;
+  }
+
+  async getStatus(): Promise<SimulationStatus> {
+    if (!this.client) {
+      return {
+        running: false,
+        connected: false,
+        nanos: 0,
+      };
+    }
+
+    const status = await this.client.simStatus();
+    return {
+      running: status.running,
+      connected: this.isConnected,
+      nanos: status.nanos,
+      project: this.currentProject,
+    };
+  }
+
+  async writeSerial(text: string): Promise<void> {
+    if (!this.client) {
+      throw new Error('Not connected to simulation');
+    }
+
+    const bytes = Array.from(text).map((char) => char.charCodeAt(0));
+    await this.client.serialMonitorWrite(bytes);
+  }
+
+  getSerialOutput(): string {
+    return this.serialBuffer.join('');
+  }
+
+  clearSerialBuffer(): void {
+    this.serialBuffer = [];
+  }
+
+  async readPin(partId: string, pin: string): Promise<{ value: number; voltage: number }> {
+    if (!this.client) {
+      throw new Error('Not connected to simulation');
+    }
+
+    const result = await this.client.pinRead(partId, pin);
+    return {
+      value: result.value,
+      voltage: result.voltage,
+    };
+  }
+
+  async setControl(partId: string, control: string, value: number): Promise<void> {
+    if (!this.client) {
+      throw new Error('Not connected to simulation');
+    }
+
+    await this.client.controlSet(partId, control, value);
+  }
+
+  async takeScreenshot(partId: string): Promise<string> {
+    if (!this.client) {
+      throw new Error('Not connected to simulation');
+    }
+
+    const result = await this.client.framebufferRead(partId);
+    return result.png;
+  }
+
+  async exportVCD(outputPath: string): Promise<VCDReadResponse> {
+    if (!this.client) {
+      throw new Error('Not connected to simulation');
+    }
+
+    const result = await this.client.readVCD();
+    if (result.sampleCount > 0) {
+      writeFileSync(outputPath, result.vcd);
+    }
+    return result;
+  }
+
+  async cleanup(): Promise<void> {
+    if (this.client) {
+      this.client.close();
+      this.client = undefined;
+      this.isConnected = false;
+    }
+  }
+}

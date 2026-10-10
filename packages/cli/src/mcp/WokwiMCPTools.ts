@@ -1,0 +1,317 @@
+import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import type { LintResult } from '@wokwi/diagram-lint';
+import type { SimulationManager } from './SimulationManager.js';
+
+export interface WokwiMCPToolsOptions {
+  getLintWarnings?: () => LintResult | null;
+}
+
+export class WokwiMCPTools {
+  private readonly getLintWarnings?: () => LintResult | null;
+
+  constructor(
+    private readonly simulationManager: SimulationManager,
+    options?: WokwiMCPToolsOptions,
+  ) {
+    this.getLintWarnings = options?.getLintWarnings;
+  }
+
+  listTools(): Tool[] {
+    return [
+      {
+        name: 'wokwi_start_simulation',
+        description: 'Start a Wokwi simulation',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            projectPath: {
+              type: 'string',
+              description:
+                'Path to the project directory (optional, defaults to current directory)',
+            },
+            sdcard: {
+              type: 'string',
+              description:
+                'SD card contents: a folder or a raw .img file, relative to the project directory (optional; overrides [[sdcard]] in wokwi.toml and the sdcard/ folder)',
+            },
+            sdcardOut: {
+              type: 'string',
+              description:
+                'Write the final SD card contents here when the simulation is stopped or restarted (.img for an image, otherwise a folder; optional)',
+            },
+          },
+        },
+      },
+      {
+        name: 'wokwi_stop_simulation',
+        description: 'Stop the current simulation',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'wokwi_resume_simulation',
+        description: 'Resume a paused simulation',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'wokwi_restart_simulation',
+        description: 'Restart the current simulation',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'wokwi_get_status',
+        description: 'Get the current simulation status',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'wokwi_write_serial',
+        description: 'Write data to the serial monitor',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            text: {
+              type: 'string',
+              description: 'Text to write to the serial monitor',
+            },
+          },
+          required: ['text'],
+        },
+      },
+      {
+        name: 'wokwi_read_serial',
+        description: 'Read data from the serial monitor',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            clear: {
+              type: 'boolean',
+              description: 'Clear the serial buffer after reading (default: false)',
+            },
+          },
+        },
+      },
+      {
+        name: 'wokwi_read_pin',
+        description: 'Read the value of a pin',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            partId: {
+              type: 'string',
+              description: 'ID of the part/component',
+            },
+            pin: {
+              type: 'string',
+              description: 'Pin name or number',
+            },
+          },
+          required: ['partId', 'pin'],
+        },
+      },
+      {
+        name: 'wokwi_set_control',
+        description: 'Set a control value (e.g., potentiometer, button)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            partId: {
+              type: 'string',
+              description: 'ID of the part/component',
+            },
+            control: {
+              type: 'string',
+              description: 'Control name',
+            },
+            value: {
+              type: 'number',
+              description: 'Value to set',
+            },
+          },
+          required: ['partId', 'control', 'value'],
+        },
+      },
+      {
+        name: 'wokwi_take_screenshot',
+        description: 'Take a screenshot of a display component',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            partId: {
+              type: 'string',
+              description: 'ID of the display component',
+            },
+          },
+          required: ['partId'],
+        },
+      },
+      {
+        name: 'wokwi_export_vcd',
+        description: 'Export logic analyzer data as VCD (Value Change Dump) file',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            outputPath: {
+              type: 'string',
+              description: 'Path where VCD file will be saved',
+            },
+          },
+          required: ['outputPath'],
+        },
+      },
+    ];
+  }
+
+  async callTool(
+    name: string,
+    args: any,
+  ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+    try {
+      switch (name) {
+        case 'wokwi_start_simulation': {
+          const writeBack = await this.simulationManager.startSimulation(args.projectPath, {
+            sdcard: args.sdcard,
+            sdcardOut: args.sdcardOut,
+          });
+
+          let responseText = 'Simulation started successfully';
+          if (writeBack.length) {
+            responseText += `\n\n${writeBack.join('\n')}`;
+          }
+          const warnings = this.getLintWarnings?.();
+          if (warnings && warnings.stats.warnings > 0) {
+            const warningList = warnings.issues
+              .filter((i) => i.severity === 'warning')
+              .map((i) => `- [${i.rule}] ${i.message}`)
+              .join('\n');
+            responseText += `\n\nDiagram warnings:\n${warningList}`;
+          }
+
+          return {
+            content: [{ type: 'text', text: responseText }],
+          };
+        }
+
+        case 'wokwi_stop_simulation': {
+          const writeBack = await this.simulationManager.stopSimulation();
+          return {
+            content: [{ type: 'text', text: ['Simulation stopped', ...writeBack].join('\n') }],
+          };
+        }
+
+        case 'wokwi_resume_simulation':
+          await this.simulationManager.resumeSimulation();
+          return {
+            content: [{ type: 'text', text: 'Simulation resumed' }],
+          };
+
+        case 'wokwi_restart_simulation': {
+          const writeBack = await this.simulationManager.restartSimulation();
+          return {
+            content: [{ type: 'text', text: ['Simulation restarted', ...writeBack].join('\n') }],
+          };
+        }
+
+        case 'wokwi_get_status': {
+          const status = await this.simulationManager.getStatus();
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(status, null, 2),
+              },
+            ],
+          };
+        }
+
+        case 'wokwi_write_serial':
+          await this.simulationManager.writeSerial(args.text);
+          return {
+            content: [{ type: 'text', text: `Written to serial: ${args.text}` }],
+          };
+
+        case 'wokwi_read_serial': {
+          const output = this.simulationManager.getSerialOutput();
+          if (args.clear) {
+            this.simulationManager.clearSerialBuffer();
+          }
+          return {
+            content: [{ type: 'text', text: output || 'No serial output' }],
+          };
+        }
+
+        case 'wokwi_read_pin': {
+          const pinValue = await this.simulationManager.readPin(args.partId, args.pin);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Pin ${args.pin} on ${args.partId}: ${pinValue.value} (${pinValue.voltage}V)`,
+              },
+            ],
+          };
+        }
+
+        case 'wokwi_set_control':
+          await this.simulationManager.setControl(args.partId, args.control, args.value);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Set ${args.control} on ${args.partId} to ${args.value}`,
+              },
+            ],
+          };
+
+        case 'wokwi_take_screenshot': {
+          const screenshot = await this.simulationManager.takeScreenshot(args.partId);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Screenshot taken (base64): ${screenshot.substring(0, 100)}...`,
+              },
+            ],
+          };
+        }
+
+        case 'wokwi_export_vcd': {
+          const result = await this.simulationManager.exportVCD(args.outputPath);
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  result.sampleCount > 0
+                    ? `VCD exported to: ${args.outputPath} (${result.sampleCount} samples, ${result.channelCount} channels)`
+                    : 'No logic analyzer data to export',
+              },
+            ],
+          };
+        }
+
+        default:
+          throw new Error(`Unknown tool: ${name}`);
+      }
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          },
+        ],
+      };
+    }
+  }
+}

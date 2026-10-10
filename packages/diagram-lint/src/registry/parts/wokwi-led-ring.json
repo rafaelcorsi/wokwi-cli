@@ -1,0 +1,12 @@
+{
+  "type": "wokwi-led-ring",
+  "pins": ["GND", "VCC", "DIN", "DOUT"],
+  "attrs": [
+    {
+      "name": "pixels",
+      "type": "number"
+    }
+  ],
+  "documented": true,
+  "category": "leds"
+}

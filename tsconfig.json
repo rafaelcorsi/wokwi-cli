@@ -1,18 +1,23 @@
 {
-  "compilerOptions": {
-    "rootDir": "src",
-    "target": "es2020",
-    "module": "ESNext",
-    "outDir": "./dist",
-    "strict": true,
-    "noFallthroughCasesInSwitch": true,
-    "declaration": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "moduleResolution": "Node16",
-    "forceConsistentCasingInFileNames": true
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.spec.ts"]
+    "extends": "./tsconfig.base.json",
+    "include": [
+        "eslint.config.ts",
+        "playwright.config.ts",
+        "vitest.config.ts",
+        "./test/**/*.test.ts",
+        "./test/**/*.ts",
+        "./packages/*/src/**/*.ts",
+        "./packages/*/test/**/*.ts",
+        "./scripts/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "**/dist",
+        "**/build"
+    ],
+    "compilerOptions": {
+        "rootDir": ".",
+        "allowJs": true,
+        "noEmit": true
+    }
 }

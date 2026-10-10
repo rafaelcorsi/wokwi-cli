@@ -1,0 +1,32 @@
+{
+  "type": "wokwi-led-matrix",
+  "pins": ["DIN", "VDD", "VSS", "DOUT"],
+  "attrs": [
+    {
+      "name": "rows",
+      "type": "number"
+    },
+    {
+      "name": "cols",
+      "type": "number"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "brightness",
+      "type": "number"
+    },
+    {
+      "name": "pixelShape",
+      "type": "string"
+    },
+    {
+      "name": "pixelSize",
+      "type": "string"
+    }
+  ],
+  "documented": true,
+  "category": "leds"
+}

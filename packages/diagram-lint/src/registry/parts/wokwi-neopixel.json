@@ -1,0 +1,7 @@
+{
+  "type": "wokwi-neopixel",
+  "pins": ["DIN", "VDD", "VSS", "DOUT"],
+  "attrs": [],
+  "documented": true,
+  "category": "leds"
+}
